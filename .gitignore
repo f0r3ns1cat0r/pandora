@@ -123,9 +123,15 @@ tasks/
 # Yara
 yara_rules/*.yar
 yara.compiled
+yara_repos/yara-hq-full
+yara_repos/yarahub
 
 # kvrocks
 storage/*.log.*
 storage/kvrocks.INFO
 storage/storage.pid
 storage/db/
+indexing/*.log.*
+indexing/kvrocks.INFO
+indexing/storage.pid
+indexing/db/
