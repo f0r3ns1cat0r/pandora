@@ -29,34 +29,84 @@ class Pdf(BaseWorker):
             self.logger.warning(f'Unable to check encoding for PDF file: {e}')
             return False
 
-    def _extract_javascript(self, doc: Document) -> list[str]:
+    def _get_stream(self, doc: Document, xref: int) -> bytes | None:
+        # Try to extract stream data
+        if not doc.xref_is_stream(xref):  # type: ignore[no-untyped-call]
+            return None
         try:
-            js_scripts = []
-            for xref in range(1, doc.xref_length()):  # type: ignore[no-untyped-call]
-                # Check for /JS and /JavaScript entries
-                obj_dict = doc.xref_object(xref, compressed=True)  # type: ignore[no-untyped-call]
+            data = doc.xref_stream(xref)  # type: ignore[no-untyped-call]
+            if data:
+                return data
+        except Exception:
+            pass
+        try:
+            # Extract raw bytes as a fallback
+            return doc.xref_stream_raw(xref)  # type: ignore[no-untyped-call]
+        except Exception:
+            return None
 
-                for key in ["/JS", "/JavaScript"]:
+    def _extract_javascript(self, doc: Document) -> list[str]:
+        js_scripts: list[str] = []
+        js_indicators = ["/JS", "/JavaScript"]
+        try:
+            for xref in range(1, doc.xref_length()):  # type: ignore[no-untyped-call]
+                # Check for JavaScript in objects
+                try:
+                    obj_dict = doc.xref_object(xref, compressed=True)  # type: ignore[no-untyped-call]
+                    if obj_dict is None:
+                        continue
+                except (RuntimeError, ValueError, TypeError) as e:
+                    self.logger.warning(f"Skipping xref {xref}: {e}")
+                    continue
+
+                for key in js_indicators:
                     if key in obj_dict:
                         js_type = doc.xref_get_key(xref, key[1:])  # type: ignore[no-untyped-call]
                         if js_type != ("null", "null"):
                             if js_type[0] == "string":  # Directly embedded JavaScript
                                 js_scripts.append(js_type[1])
                             elif js_type[0] == "xref":  # JavaScript referenced in another object
-                                js_ref = int(js_type[1].split()[0])
-                                js_code = doc.xref_stream(js_ref).decode('utf-8')  # type: ignore[no-untyped-call]
-                                js_scripts.append(js_code)
+                                try:
+                                    js_ref = int(js_type[1].split()[0])
+                                    stream = self._get_stream(doc, js_ref)
+                                    if stream:
+                                        js_scripts.append(stream.decode('utf-8', errors='replace'))
+                                except Exception as e:
+                                    self.logger.warning(f'Unable to read referenced stream: {e}')
+
+                # Check for JavaScript in object streams
+                stream = self._get_stream(doc, xref)
+
+                if stream:
+                    decoded_stream = stream.decode('latin-1', errors='replace')
+                    for key in js_indicators:
+                        if key in decoded_stream:
+                            js_scripts.append(decoded_stream)
 
         except Exception as e:
             self.logger.warning(f'Unable to extract JavaScript from PDF file: {e}')
 
-        return js_scripts
+        seen: set[str] = set()
+        unique_scripts = []
+        for script in js_scripts:
+            if script not in seen:
+                seen.add(script)
+                unique_scripts.append(script)
+
+        return unique_scripts
 
     def _detect_suspicious_objects(self, doc: Document) -> list[str]:
         try:
             suspicious_objects = []
             for xref in range(1, doc.xref_length()):  # type: ignore[no-untyped-call]
-                obj_dict = doc.xref_object(xref, compressed=True)  # type: ignore[no-untyped-call]
+                try:
+                    obj_dict = doc.xref_object(xref, compressed=True)  # type: ignore[no-untyped-call]
+                    if obj_dict is None:
+                        continue
+                except (RuntimeError, ValueError, TypeError) as e:
+                    self.logger.warning(f"Skipping xref {xref}: {e}")
+                    continue
+
                 # Check for /AA, /OpenAction OR /Launch
                 for keyword in ["/AA", "/OpenAction", "/Launch"]:
                     # Use regex to reduce FPs, especially with /AA
@@ -64,10 +114,11 @@ class Pdf(BaseWorker):
                         suspicious_objects.append(f'{keyword} found in object {xref}: {obj_dict}')
                         # Attempt to extract the object content if possible
                         try:
-                            content = doc.xref_stream(xref)  # type: ignore[no-untyped-call]
-                            suspicious_objects.append(content.decode('utf-8', errors='ignore'))
+                            content = self._get_stream(doc, xref)
+                            if content:
+                                suspicious_objects.append(content.decode('utf-8', errors='ignore'))
                         except Exception as e:
-                            self.logger.warning(f'Unable to extract object content: {e}')
+                            self.logger.warning(f'Unable to read referenced stream: {e}')
 
         except Exception as e:
             self.logger.warning(f'Unable to detect suspicious objects in PDF file: {e}')
@@ -108,19 +159,19 @@ class Pdf(BaseWorker):
                     embedded_files = self._detect_embedded_files(doc)
 
             report_data = {
-                "Is Encoded": is_encrypted,
+                "Is Encrypted": is_encrypted,
                 "Javascript Found": js_scripts,
                 "Suspicious Objects Found": suspicious_objects,
                 "Embedded Files Found": embedded_files,
             }
-            report_data = {k: v for k, v in report_data.items() if v}
+            for k, v in report_data.items():
+                if v:
+                    report.add_details(k, v)
 
             if js_scripts or is_encrypted or suspicious_objects or embedded_files:
                 report.status = Status.ALERT
-                report.add_details('malicious', report_data)
             else:
                 report.status = Status.CLEAN
-                report.add_details('analysis', report_data)
 
         except Exception as e:
             self.logger.warning(f'Unable to process PDF file: {e}')
