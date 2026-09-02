@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 import pymupdf
 from pymupdf import Document
@@ -125,11 +124,11 @@ class Pdf(BaseWorker):
 
         return suspicious_objects
 
-    def _detect_embedded_files(self, doc: Document) -> list[dict[str, Any]]:
+    def _detect_embedded_files(self, doc: Document) -> list[str]:
         try:
             embedded_files = []
             for item in range(doc.embfile_count()):
-                embedded_files.append(doc.embfile_info(item))
+                embedded_files.append(str(doc.embfile_info(item)))
 
         except Exception as e:
             self.logger.warning(f'Unable to detect embedded files in PDF file: {e}')
@@ -158,18 +157,20 @@ class Pdf(BaseWorker):
                 if self.check_embedded_files:
                     embedded_files = self._detect_embedded_files(doc)
 
-            report_data = {
-                "Is Encrypted": is_encrypted,
-                "Javascript Found": js_scripts,
-                "Suspicious Objects Found": suspicious_objects,
-                "Embedded Files Found": embedded_files,
-            }
-            for k, v in report_data.items():
-                if v:
-                    report.add_details(k, v)
+            if is_encrypted:
+                report.add_details("Is Encrypted", "Yes")
+            if js_scripts:
+                report.add_details("Javascript Found", js_scripts)
+            if suspicious_objects:
+                report.add_details("Suspicious Objects Found", suspicious_objects)
+            if embedded_files:
+                report.add_details("Embedded Files Found", embedded_files)
 
             if js_scripts or is_encrypted or suspicious_objects or embedded_files:
-                report.status = Status.ALERT
+                if is_encrypted:
+                    report.status = Status.WARN
+                if js_scripts or suspicious_objects or embedded_files:
+                    report.status = Status.ALERT
             else:
                 report.status = Status.CLEAN
 
