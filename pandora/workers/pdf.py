@@ -36,12 +36,14 @@ class Pdf(BaseWorker):
             data = doc.xref_stream(xref)  # type: ignore[no-untyped-call]
             if data:
                 return data
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.warning(f"Failed to extract stream from xref {xref}: {e}")
+
         try:
             # Extract raw bytes as a fallback
             return doc.xref_stream_raw(xref)  # type: ignore[no-untyped-call]
-        except Exception:
+        except Exception as e:
+            self.logger.warning(f"Failed to extract raw stream from xref {xref}: {e}")
             return None
 
     def _extract_javascript(self, doc: Document) -> list[str]:
