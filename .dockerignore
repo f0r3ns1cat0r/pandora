@@ -5,7 +5,6 @@
 .gitmodules
 cache
 config
-doc
 indexing
 logs
 storage
