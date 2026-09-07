@@ -1,0 +1,14 @@
+.git
+.gitattributes
+.github
+.gitignore
+.gitmodules
+cache
+config
+indexing
+logs
+storage
+tasks
+web_logs
+yara_repos
+yara_rules

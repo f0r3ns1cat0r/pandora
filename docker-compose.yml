@@ -1,4 +1,3 @@
-version: '3'
 services:
 
   kvrocks:
@@ -9,6 +8,20 @@ services:
     command: ["--log-dir", "stdout"]
     healthcheck:
       test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-p", "6101", "ping"]
+      interval: 10s
+      timeout: 1s
+      retries: 3
+      start_period: 30s
+      start_interval: 10s
+
+  kvrocks-indexing:
+    image: apache/kvrocks
+    working_dir: /var/lib/kvrocks
+    volumes:
+        - ./indexing:/var/lib/kvrocks
+    command: ["--log-dir", "stdout"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-s", "/var/lib/kvrocks/kvrocks_index.sock", "ping"]
       interval: 10s
       timeout: 1s
       retries: 3
@@ -55,6 +68,7 @@ services:
     volumes:
         - ./cache:/pandora/cache
         - ./storage:/pandora/storage
+        - ./indexing:/pandora/indexing
         - ./pandora/workers:/pandora/pandora/workers
         - ./config:/pandora/config
         - ./yara_rules:/pandora/yara_rules
@@ -63,10 +77,20 @@ services:
         - ./web_logs:/pandora/website/logs
         - ./tasks:/pandora/tasks
         - clamav-socket:/var/run/clamav
+    depends_on:
+        kvrocks:
+            condition: service_healthy
+        kvrocks-indexing:
+            condition: service_healthy
+        redis:
+            condition: service_healthy
+        clamav:
+            condition: service_healthy
     links:
         - "clamav"
         - "redis"
         - "kvrocks"
+        - "kvrocks-indexing"
     ports:
         - 6100:6100
 
