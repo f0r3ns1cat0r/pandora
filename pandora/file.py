@@ -17,7 +17,7 @@ from zipfile import ZipFile
 import exiftool  # type: ignore[import-untyped]
 import pymupdf
 import pikepdf
-import pillow_heif  # type: ignore[import-untyped]
+from pillow_heif import register_heif_opener  # type: ignore[attr-defined]
 
 from bs4 import BeautifulSoup
 from oletools.msodde import process_maybe_encrypted  # type: ignore[import-untyped]
@@ -294,22 +294,11 @@ class File:
         if self.is_image:
             try:
                 if self.mime_type in ['image/heic', 'image/heif']:
-                    heif_file = pillow_heif.read_heif(str(self.path))
-                    image = Image.frombytes(
-                        heif_file.mode,
-                        heif_file.size,
-                        heif_file.data,
-                        "raw",
-                        heif_file.mode,
-                        heif_file.stride,
-                    )
-                    im = image.convert('RGB')
-                    im.save(f'{self.path}.pdf')
-                else:
-                    with Image.open(self.path) as image:
-                        # we can do that because it returns a copy as an Image, which has a CM
-                        with image.convert('RGB') as im:
-                            im.save(f'{self.path}.pdf')
+                    register_heif_opener(thumbnails=False)
+                with Image.open(self.path) as image:
+                    # we can do that because it returns a copy as an Image, which has a CM
+                    with image.convert('RGB') as im:
+                        im.save(f'{self.path}.pdf')
 
             except Exception as e:
                 self.logger.warning(f'Unable to generate a preview of the image: {e}')
